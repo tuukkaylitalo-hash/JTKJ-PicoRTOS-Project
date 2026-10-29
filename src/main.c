@@ -24,8 +24,8 @@
 // Tehtävä 3: Tilakoneen esittely Add missing states.
 // Exercise 3: Definition of the state machine. Add missing states.
 // Lisätty puuttuva tila : DATA_READY
-//enum state { WAITING=1, DATA_READY};
-//enum state programState = WAITING;
+enum state { WAITING=1, DATA_READY};
+enum state programState = WAITING;
 
 // Tehtävä 3: Valoisuuden globaali muuttuja
 // Exercise 3: Global variable for ambient light
@@ -59,7 +59,7 @@ static void sensor_task(void *arg){
         // tight_loop_contents(); 
 
         // Tehtävä 2 alla
-        //uint32_t light = veml6030_read_light();
+        uint32_t light = veml6030_read_light();
         //printf("Valoisuus: %lu luxia\n", (unsigned long)light);
 
 
@@ -74,10 +74,10 @@ static void sensor_task(void *arg){
 
          // Tehtävä 3 alla
 
-       /* if (programState == WAITING){
+       if (programState == WAITING){
             ambientLight = veml6030_read_light();
             programState = DATA_READY;
-        }*/
+        }
         
         // Exercise 2. Just for sanity check. Please, comment this out
         // Tehtävä 2: Just for sanity check. Please, comment this out
@@ -105,9 +105,10 @@ static void print_task(void *arg){
 
         // Tehtävä 3. Tulostus kun DATA_READY (kommentoituna kun 4. tehtävä testissä)
 
-        /*if(programState == DATA_READY){
+        if(programState == DATA_READY){
             printf("Valoisuus: %lu luxia\n", (unsigned long)ambientLight);
-        }*/
+            programState = WAITING;
+        }
 
         // Tehtävä 4:n tulostus
 
@@ -167,7 +168,7 @@ static void print_task(void *arg){
 
         // Exercise 3. Just for sanity check. Please, comment this out
         // Tehtävä 3: Just for sanity check. Please, comment this out
-        // printf("printTask\n");
+        //printf("printTask\n");
         
         // Do not remove this
         vTaskDelay(pdMS_TO_TICKS(500));
