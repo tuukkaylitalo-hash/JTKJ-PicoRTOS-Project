@@ -198,7 +198,7 @@ static void print_task(void *arg){
 
     }*/
 
-        // Merkkien kirjaimiksi muuttamisen testausta sarjamonitorinäkymään
+        // Merkkien kirjaimiksi muuttamista ja viestien vastaanottamista ja lähettämistä USB-liikenteen avulla. 
 
         char buf[64];       //Yhdellä lukukerralla saadut tavut
         char message[256];  //Eri lukukerroilta kertyvä viesti
