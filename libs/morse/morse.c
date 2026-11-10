@@ -1,4 +1,6 @@
 #include "morse.h"
+#include <stddef.h>
+#include <string.h>
 
 const char* morsetable[] = {
     ".-", // A

@@ -10,6 +10,9 @@
 
 #include "tkjhat/sdk.h"
 
+#include "usb_comm.h" // USB-moduulin usb_init ja usb_task-funktioiden esittelyt.
+#include "morse.h" // Kirjasto morse-merkkien muuntamiseen kirjaimiksi
+
 // Exercise 4. Include the libraries necessaries to use the usb-serial-debug, and tinyusb
 // Tehtävä 4 . Lisää usb-serial-debugin ja tinyusbin käyttämiseen tarvittavat kirjastot.
 
@@ -90,10 +93,8 @@ static void sensor_task(void *arg){
 
 static void print_task(void *arg){
     (void)arg;
-
-    char buf[64];
     
-    while(1){
+   /* while(1){
         
         // Tehtävä 3: Kun tila on oikea, tulosta sensoridata merkkijonossa debug-ikkunaan
         //            Muista tilamuutos
@@ -108,7 +109,7 @@ static void print_task(void *arg){
         if(programState == DATA_READY){
             printf("Valoisuus: %lu luxia\n", (unsigned long)ambientLight);
             programState = WAITING;
-        }
+        }*/
 
         // Tehtävä 4:n tulostus
 
@@ -169,9 +170,81 @@ static void print_task(void *arg){
         // Exercise 3. Just for sanity check. Please, comment this out
         // Tehtävä 3: Just for sanity check. Please, comment this out
         //printf("printTask\n");
+
+        /*
+       
+        //usb_send_morse("... --- ...  \n");
         
-        // Do not remove this
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Odota 20ms sekuntia ennen seuraavaa testilähetystä
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }*/
+{
+    
+}
+    // Testataan serial monitorin kaikua
+
+       /* while(1){
+
+        uint32_t count = usb_receive_morse(buf, sizeof(buf) - 1); // Jätetään yksi paikka nollamerkille
+
+        if (count > 0){
+            // USB-luku antaa raakoja tavuja. Lisää '\0', jotta usb_send_morse() voi laskea merkkijonon pituuden strlen():llä.
+            buf[count] = '\0';
+            usb_send_morse(buf);
+        }
+
+        // Tulosta testin tulos kerran sekunnissa.
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+    }*/
+
+        // Merkkien kirjaimiksi muuttamisen testausta sarjamonitorinäkymään
+
+        char buf[64];       //Yhdellä lukukerralla saadut tavut
+        char message[256];  //Eri lukukerroilta kertyvä viesti
+        size_t length = 0; 
+        int discard = 0;    //Ohita liian pitkä viestin loppuosa
+
+        while(1){
+            uint32_t count = usb_receive_morse(buf, sizeof(buf));
+
+            for (uint32_t i = 0; i < count; i++){
+                char c = buf[i];
+
+                if (c == '\n' || c == '!'){
+                    
+                    if(!discard && ((c == '!' && length > 0) || 
+                        (c == '\n' && length >= 2 &&
+                        message[length - 2] == ' ' &&
+                        message[length - 1] == ' '))){
+                        
+                        char letter = morse_to_letter("...");
+
+                        if(letter == 'S'){
+                            char response[] = {letter, '\n', '\0'};
+                            usb_send_morse(response);
+                        }
+                        else {
+                            usb_send_morse("MORSE-TESTI EPÄONNISTUI\n");
+                        }
+                    }
+                // Aloitetaan seuraavan viestin kerääminen tyhjästä
+                length = 0;
+                discard = 0;
+                continue;
+            }
+
+            // Kerätään tavut puskuriin, kunnes viesti päättyy tai tila loppuu
+            if(!discard){
+                if(length < sizeof(message)){
+                    message[length++] = c;
+                } else {
+                    discard = 1;
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
@@ -204,7 +277,7 @@ int main() {
 
     // Kommentoitu stdio_init_all(); pois Tehtävää 4 varten.
 
-    stdio_init_all();
+    // stdio_init_all();
 
     // Uncomment this lines if you want to wait till the serial monitor is connected
     /*while (!stdio_usb_connected()){
@@ -237,15 +310,22 @@ int main() {
     // Tehtävä 4: Poista tämän xTaskCreate-rivin kommentointi luodaksesi tehtävän,
     // joka mahdollistaa kaksikanavaisen USB-viestinnän.
 
-    // Poistettu kommentointi xTaskCreate():sta Tehtävää 4 varten.
+    // Kaksikanavaista USB-viestintää varten tehtävä, jonka FreeRTOS suorittaa ajastimen käynnistyttyä
 
-    
-   /* xTaskCreate(usbTask, "usb", 2048, NULL, 3, &hUSB);
+    BaseType_t usb_result = xTaskCreate(usb_task, // Tehtäväfunktio
+                "usb",                            // Tehtävän nimi 
+                2048,                             // Stackin koko
+                NULL,                             // Tehtävän argumentit
+                3,                                // Tehtävän prioriteetti
+                &hUSB);                           // Tehtävän kahva
+
+    if(usb_result != pdPASS){                     //Tarkistetaan, että USB-tehtävän luonti onnistui.
+        return 1;
+    }
+
     #if (configNUMBER_OF_CORES > 1)
         vTaskCoreAffinitySet(hUSB, 1u << 0);
-    #endif*/
-
-
+    #endif
 
 
     // Create the tasks with xTaskCreate
@@ -275,6 +355,10 @@ int main() {
     // Lisätään Tehtävän 4 alustukset
     //tusb_init();
     //usb_serial_init();
+
+    // Alusta USB-moduuli ennen kuin FreeRTOS käynnistää tehtävät
+
+    usb_init(); // usb_comm.c tiedostossa alustukset
 
     // Start the scheduler (never returns)
     vTaskStartScheduler();

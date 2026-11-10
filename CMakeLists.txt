@@ -89,7 +89,7 @@ add_subdirectory(libs/usb-serial-debug)
 add_subdirectory(examples/hello_blink_freertos)
 # add_subdirectory(examples/hello_pico)
 # add_subdirectory(examples/hello_freertos)
-# add_subdirectory(examples/hello_dual_cdc)
+add_subdirectory(examples/hello_dual_cdc)
 #add_subdirectory(examples/hello_dual_cdc)
 # add_subdirectory(examples/hello_microphone)
 # add_subdirectory(examples/compilation_errors)
@@ -113,6 +113,11 @@ add_subdirectory(examples/hello_serial_bidirectional_client)
 # If you add the headers in a different directory, you should use: target_include_directories
 add_executable(${MAIN_TARGET}
     src/main.c
+    src/usb_comm.c # käännetään myös oman USB-moduulin toteutus
+    libs/morse/morse.c # Käännetään Morse-funktioiden toteutus
+)
+target_include_directories(${MAIN_TARGET} PRIVATE
+    libs/morse
 )
 
 # Links. Add all libraries that application is using. It must at least use the pico_stdlib
@@ -127,7 +132,7 @@ target_link_libraries(${MAIN_TARGET}
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4
         TKJHAT_SDK
-        # usb_serial_debug
+        usb_serial_debug # kahden USB-sarjaportin toteutus
 )
 
 # Include libraries necessaries to control the WiFi. If you are using the internal pico LED in W model, it is also 
@@ -137,7 +142,7 @@ if (PICO_CYW43_SUPPORTED)
 endif()
 
 #Support for stdio (printf, fwrite, puts...) via usb or UART. 
-pico_enable_stdio_usb(${MAIN_TARGET} 1)
+pico_enable_stdio_usb(${MAIN_TARGET} 0)
 pico_enable_stdio_uart(${MAIN_TARGET} 0)
 
 # Create different output files: 
