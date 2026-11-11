@@ -211,7 +211,7 @@ static void print_task(void *arg){
             for (uint32_t i = 0; i < count; i++){
                 char c = buf[i];
 
-                if (c == '\n' || c == '!'){
+                if (c == '\n' || c == '!'){  //Huutomerkki toimii myös viestin lopettajana tässä rivinvaihdon lisäksi. Helpompi testata.
                     
                     if(!discard && ((c == '!' && length > 0) || 
                         (c == '\n' && length >= 2 &&
