@@ -34,12 +34,16 @@ uint32_t ambientLight;
 
 // btn_fxn tunnistaa GPIO-keskeytyksen aiheuttaneen napin (SW1/SW2) ja ilmoittaa siitä print_taskille
 // gpio: kertoo mikä pinni aiheutti keskeytyksen. eventMask: kertoo keskeytystyypin, jota tässä ei käytetä
+
 // Keskeytyskäsitteljä käyttää kahvaa nappitapahtuman ilmoituksesta print_taskille
 
 static TaskHandle_t hPrintTask = NULL;  
 static void btn_fxn(uint gpio, uint32_t eventMask) {
 
     // Harjoitustyö: 
+    // Tuukka: Tässä kohdassa kysytty tekoälyltä apua sopivien FreeRTOS-funktioiden käyttöön keskeytyskäsittelijässä.
+    //         tekoäly antoi funktiot ja niihin muutettu sopivat argumentit. Tekoälynä ChatGPT:n perusversio. 
+
     if ((gpio == SW1_PIN || gpio == SW2_PIN) && hPrintTask != NULL){
         BaseType_t taskWoken = pdFALSE; // FreeRTOS-muuttuja johon merkitään, tarvitaanko tehtävän vaihtoa keskeytyksen jälkeen
         uint32_t button_event; // Keskeytyksen aiheuttaneen napin ilmoitusbitti
@@ -116,62 +120,6 @@ static void sensor_task(void *arg){
 static void print_task(void *arg){
     (void)arg;
     
-   /* while(1){
-        
-        // Tehtävä 3: Kun tila on oikea, tulosta sensoridata merkkijonossa debug-ikkunaan
-        //            Muista tilamuutos
-        //            Älä unohda kommentoida seuraavaa koodiriviä.
-        // Exercise 3: Print out sensor data as string to debug window if the state is correct
-        //             Remember to modify state
-        //             Do not forget to comment next line of code.
-        // tight_loop_contents();
-
-        // Tehtävä 3. Tulostus kun DATA_READY (kommentoituna kun 4. tehtävä testissä)
-
-        if(programState == DATA_READY){
-            printf("Valoisuus: %lu luxia\n", (unsigned long)ambientLight);
-            programState = WAITING;
-        }*/
-
-        // Tehtävä 4:n tulostus
-
-        /*if (programState == DATA_READY) {
-
-            // CDC0: debug-viesti
-            if (usb_serial_connected()) {
-                snprintf(buf, sizeof(buf), "Lux:%lu\n",
-                         (unsigned long)ambientLight);
-
-                usb_serial_print(buf);
-                usb_serial_flush();
-            }
-
-            // CDC1: aikaleima ja valaistus CSV-muodossa
-            if (tud_cdc_n_connected(CDC_ITF_TX)) {
-                uint32_t timestamp = (uint32_t)(
-                    (uint64_t)xTaskGetTickCount() *
-                    1000 / configTICK_RATE_HZ
-                );
-
-                snprintf(buf, sizeof(buf), "%lu,%lu\n",
-                         (unsigned long)timestamp,
-                         (unsigned long)ambientLight);
-
-                tud_cdc_n_write(
-                    CDC_ITF_TX,
-                    buf,
-                    strlen(buf)
-                );
-
-                tud_cdc_n_write_flush(CDC_ITF_TX);
-            }
-
-            programState = WAITING;
-        }*/
-{
-    
-}
-    
         // Harjoitustyön muuttujia printTaskille
 
         char buf[64];       // Yhdellä USB-lukukerralla vastaanotetut tavut
@@ -202,78 +150,100 @@ static void print_task(void *arg){
             GPIO_IRQ_EDGE_RISE,
             true);
 
+        
+       Harjoitustyö: // Morse-koodin muodostaminen ja sen USB-lähettäminen
 
+        TickType_t recent_SW1_press = 0;  // Alustetaan viimeisin SW1-painallus
+        bool hasPreviousPress = false;  // Alustetaan onko vielä painallusta tullut
+        
         while(1){
 
            uint32_t button_events;  // FreeRTOS:lla luetut tapahtumabitit. Molemmat napit voivat olla ilmoitettuina
 
             // xTaskNotifyWait tarkistaa nappitapahtumat jäämättä odottamaan niitä
+            // Tuukka: Tässä kysytty tekoälyltä sopivan FreeRTOS-funktion käyttöä tehtävän suorittamiseen ja saatua kutsuesimerkkiä
+            //         täydennetty itse argumenteilla. Tekoälynä ChatGPT perusversio. 
 
             if (xTaskNotifyWait(
                 0,                      // Ilmoitusbittejä ei nollata ennen lukemista
                 SW1_EVENT | SW2_EVENT,  // Kuitataan molempien nappien bitit lukemisen jälkeen
                 &button_events,         // Osoite, jonne saapuneet bitit kopioidaan
-                0)                      // Odotusaika (number of Ticks)
+                0)                      // Odotusaika (number of Ticks) eli ei jäädä odottamaan ilmoitusta
                 == pdTRUE){             // == pdTRUE: ilmoitus on saatu
                 
-                // Saapuneiden nappitapahtumien käsittely 
+                // Saapuneiden nappitapahtumien käsittely:
+
+                // SW1-painikkeen haara
+                TickType_t time_now = xTaskGetTickCount();
 
                 if (button_events & SW1_EVENT){
                     const char *debug_text;  // SW1-painalluksen tuloksen viesti porttiin CDC0
 
-                    if (!writing) {
-                        writing = true;
-                        sw1_streak = 0; // SW1 peräkkäisten painallusten nollaus
-                        symbol_count = 0; // SW2 peräkkäisten symbolien nollaus
-                        debug_text = "Kirjoitus alkoi\n";
-                        } else{
-                            if (tx_length == 0){
-                                debug_text = "Lisää ensin merkki\n";
+                    if(!hasPreviousPress ||(time_now - recent_SW1_press >= pdMS_TO_TICKS(100))){ // Lisätään viive SW1-painalluksiin
+                        recent_SW1_press = time_now;
+                        hasPreviousPress = true;
 
-                            } else if (sw1_streak < 2 && tx_length < sizeof(tx_message) -2){
+                        if (!writing) {
+                            writing = true;
+                            sw1_streak = 0; // SW1 peräkkäisten painallusten nollaus
+                            symbol_count = 0; // Morsekirjainten symbolilaskurin nollaus
+                            debug_text = "Kirjoitus alkoi\n";
+                            } else{
+                                if (tx_length == 0){
+                                    debug_text = "Lisää ensin merkki\n";
 
-                                tx_message[tx_length] = ' ';
-                                tx_length++;
-                                tx_message[tx_length] = '\0';
-                                sw1_streak++;
-                                symbol_count = 0;
-                                debug_text = "Välilyönti\n";
+                                } else if (sw1_streak < 2 && tx_length < sizeof(tx_message) -2){
 
-                            } else if (sw1_streak == 2){
+                                    tx_message[tx_length] = ' ';
+                                    tx_length++;
+                                    tx_message[tx_length] = '\0';
+                                    sw1_streak++;
+                                    symbol_count = 0;
 
-                                sw1_streak = 3;
-                                debug_text = "Viesti valmis. SW1 lähettää, SW2 jatkaa. \n";
+                                    if(sw1_streak == 1){
+                                        debug_text = "Kirjainväli\n";
+                                    } else {
+                                        debug_text = "Sanaväli\n";
+                                    }
 
-                            } else if (sw1_streak == 3){
-                                // Puskurin lopussa kaksi välilyöntiä
+                                } else if (sw1_streak == 2){
 
-                                tx_message[tx_length] = '\n';
-                                tx_message[tx_length +1] = '\0';
-                                usb_send_morse(tx_message);
+                                    sw1_streak = 3;
+                                    debug_text = "Viesti valmis. SW1 lähettää, SW2 jatkaa. \n";
 
-                                // Tyhjennetään kirjoituspuskuri ja palataan odottamaan uutta viestiä
+                                } else if (sw1_streak == 3){
+                                    // Puskurin lopussa kaksi välilyöntiä
 
-                                tx_length = 0;
-                                tx_message[0] = '\0';
-                                sw1_streak = 0;     // SW1 peräkkäisten painallusten nollaus
-                                symbol_count = 0; // SW2 peräkkäisten symbolien nollaus
-                                writing = false;
-                                debug_text = "Lähetyspyyntö tehty\n";
+                                    tx_message[tx_length] = '\n';
+                                    tx_message[tx_length +1] = '\0';
+                                    usb_send_morse(tx_message);
 
-                            } else {
-                                debug_text = "Puskuri täynnä\n";
+                                    // Tyhjennetään kirjoituspuskuri ja palataan odottamaan uutta viestiä
+
+                                    tx_length = 0;
+                                    tx_message[0] = '\0';
+                                    sw1_streak = 0;     // SW1 peräkkäisten painallusten nollaus
+                                    symbol_count = 0; // SW2 peräkkäisten symbolien nollaus
+                                    writing = false;
+                                    debug_text = "Lähetyspyyntö tehty\n";
+
+                                } else {
+                                    debug_text = "Puskuri täynnä\n";
+                                }
+                                
                             }
-                            
-                        }
 
-                    if (usb_serial_connected()) {
-                    usb_serial_print(debug_text);
-                    usb_serial_flush();
+                        if (usb_serial_connected()) {
+                            usb_serial_print(debug_text);
+                            usb_serial_flush();  // Lähetetään CDC0:n puskuroitu debug-teksti
+                        }
                     }
             }
 
+                // SW2-painikkeen haara
+
                 if ((button_events & SW2_EVENT) && writing) {
-                    char symbol = '\0'; //Symbolin tunnistus tähän muuttujaan sensor datan lukemisen jälkeen.
+                    char symbol = '\0'; // Alustus symbolimuuttujalle. 
 
                     if(imu_ready){
                         float ax, ay, az, gx, gy, gz, t;  // ax, ay, az kiihtyvyyksiä eri akseleilla. Tunnistus käyttää X- ja Z- arvoja.
@@ -377,9 +347,6 @@ int main() {
 
     TaskHandle_t hSensorTask, hUSB = NULL;
 
-    // Tehtävä 4: Poista tämän xTaskCreate-rivin kommentointi luodaksesi tehtävän,
-    // joka mahdollistaa kaksikanavaisen USB-viestinnän.
-
     // Kaksikanavaista USB-viestintää varten tehtävä, jonka FreeRTOS suorittaa ajastimen käynnistyttyä
 
     BaseType_t usb_result = xTaskCreate(usb_task, // Tehtäväfunktio
@@ -411,8 +378,8 @@ int main() {
         return 0;
     }
     result = xTaskCreate(print_task,  // Viimeisimmän print-tehtävän luonnin paluuarvo
-                "print",              // Tehtävän nimi vianetsintää varten 
-                DEFAULT_STACK_SIZE,   // Tehtävän pinon koko sanoina, ei tavuina
+                "print",              // Tehtävän nimi
+                DEFAULT_STACK_SIZE,   // Tehtävän pinon koko sanoina
                 NULL,                 // Tehtäväfunktiolle annettava argumentti
                 2,                    // Tehtävän prioriteetti
                 &hPrintTask);         // Osoite, johon FreeRTOS tallentaa tehtävän kahvan
