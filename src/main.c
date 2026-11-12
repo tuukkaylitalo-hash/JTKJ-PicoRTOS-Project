@@ -1,7 +1,7 @@
 
 #include <stdio.h>
 #include <string.h>
-
+#include <math.h>
 #include <pico/stdlib.h>
 
 #include <FreeRTOS.h>
@@ -9,19 +9,17 @@
 #include <task.h>
 
 #include "tkjhat/sdk.h"
-
-#include "usb_comm.h" // USB-moduulin usb_init ja usb_task-funktioiden esittelyt.
+#include <stdbool.h>
+#include "usb_comm.h" // USB-moduulin funktioita
 #include "morse.h" // Kirjasto morse-merkkien muuntamiseen kirjaimiksi
+#include "usbSerialDebug/helper.h"  //USB-debug kirjasto
 
-// Exercise 4. Include the libraries necessaries to use the usb-serial-debug, and tinyusb
-// Tehtävä 4 . Lisää usb-serial-debugin ja tinyusbin käyttämiseen tarvittavat kirjastot.
+#define DEFAULT_STACK_SIZE 2048  //Tehtävien pinon koko sanoina
+#define CDC_ITF_TX      1        //CDC1-portin rajapinta
 
-//#include <tusb.h>
-//#include "usbSerialDebug/helper.h"
+#define SW1_EVENT (1u << 0) // SW1-painalluksen ilmoitusbitti.
+#define SW2_EVENT (1u << 1) // SW2-painalluksen ilmoitusbitti.
 
-
-#define DEFAULT_STACK_SIZE 2048
-#define CDC_ITF_TX      1
 
 
 // Tehtävä 3: Tilakoneen esittely Add missing states.
@@ -34,13 +32,35 @@ enum state programState = WAITING;
 // Exercise 3: Global variable for ambient light
 uint32_t ambientLight;
 
-static void btn_fxn(uint gpio, uint32_t eventMask) {
-    // Tehtävä 1: Vaihda LEDin tila.
-    //            Tarkista SDK, ja jos et löydä vastaavaa funktiota, sinun täytyy toteuttaa se itse.
-    // Exercise 1: Toggle the LED. 
-    //             Check the SDK and if you do not find a function you would need to implement it yourself. 
+// btn_fxn tunnistaa GPIO-keskeytyksen aiheuttaneen napin (SW1/SW2) ja ilmoittaa siitä print_taskille
+// gpio: kertoo mikä pinni aiheutti keskeytyksen. eventMask: kertoo keskeytystyypin, jota tässä ei käytetä
+// Keskeytyskäsitteljä käyttää kahvaa nappitapahtuman ilmoituksesta print_taskille
 
-    toggle_led();
+static TaskHandle_t hPrintTask = NULL;  
+static void btn_fxn(uint gpio, uint32_t eventMask) {
+
+    // Harjoitustyö: 
+    if ((gpio == SW1_PIN || gpio == SW2_PIN) && hPrintTask != NULL){
+        BaseType_t taskWoken = pdFALSE; // FreeRTOS-muuttuja johon merkitään, tarvitaanko tehtävän vaihtoa keskeytyksen jälkeen
+        uint32_t button_event; // Keskeytyksen aiheuttaneen napin ilmoitusbitti
+
+        if (gpio == SW1_PIN){
+            button_event = SW1_EVENT;
+        } else {
+            button_event = SW2_EVENT;
+        }
+
+        xTaskNotifyFromISR(     // xTaskNotifyFromISR ilmoittaa keskeytyksestä print_taskille, kumpaa nappia painettiin
+            hPrintTask,         // Ilmoituksen vastaanottavan tehtävän kahva
+            button_event,       // SW1 tai SW2 ilmoitusbitti
+            eSetBits,           // asettaa valitun bitin niin, että toisen napin käsittelemätön ilmoitus säilyy
+            &taskWoken);        // FreeRTOS voi merkitä tähän tarvitaanko tehtävän vaihtoa
+        
+        // Jos ilmoitus herätti korkeamman prioriteetin tehtävän
+        // pyydetään FreeRTOSia vaihtamaan siihen keskeytyksen päättyessä
+        portYIELD_FROM_ISR(taskWoken);
+    }
+    
 }
 
 static void sensor_task(void *arg){
@@ -90,6 +110,8 @@ static void sensor_task(void *arg){
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+
+// Print_taskissa käsitellään nappisyötöt ja IMU-mittaukset sekä lähetetään ja vastaanotetaan Morse-viestit USB-liikenteellä
 
 static void print_task(void *arg){
     (void)arg;
@@ -146,70 +168,153 @@ static void print_task(void *arg){
 
             programState = WAITING;
         }*/
-
-        
-        // Exercise 4. Use the usb_serial_print() instead of printf or similar in the previous line.
-        //             Check the rest of the code that you do not have printf (substitute them by usb_serial_print())
-        //             Use the TinyUSB library to send data through the other serial port (CDC 1).
-        //             You can use the functions at https://github.com/hathach/tinyusb/blob/master/src/class/cdc/cdc_device.h
-        //             You can find an example at hello_dual_cdc
-        //             The data written using this should be provided using csv
-        //             timestamp, luminance
-        // Tehtävä 4. Käytä usb_serial_print()-funktiota printf:n tai vastaavien sijaan edellisellä rivillä.
-        //            Tarkista myös muu koodi ja varmista, ettei siinä ole printf-kutsuja
-        //            (korvaa ne usb_serial_print()-funktiolla).
-        //            Käytä TinyUSB-kirjastoa datan lähettämiseen toisen sarjaportin (CDC 1) kautta.
-        //            Voit käyttää funktioita: https://github.com/hathach/tinyusb/blob/master/src/class/cdc/cdc_device.h
-        //            Esimerkki löytyy hello_dual_cdc-projektista.
-        //            Tällä menetelmällä kirjoitettu data tulee antaa CSV-muodossa:
-        //            timestamp, luminance
-
-
-
-
-        // Exercise 3. Just for sanity check. Please, comment this out
-        // Tehtävä 3: Just for sanity check. Please, comment this out
-        //printf("printTask\n");
-
-        /*
-       
-        //usb_send_morse("... --- ...  \n");
-        
-        // Odota 20ms sekuntia ennen seuraavaa testilähetystä
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }*/
 {
     
 }
-    // Testataan serial monitorin kaikua
+    
+        // Harjoitustyön muuttujia printTaskille
 
-       /* while(1){
+        char buf[64];       // Yhdellä USB-lukukerralla vastaanotetut tavut
+        char message[256];  // Useasta USB-luvusta koottava vastaanottopuskuri
+        size_t length = 0;  // Vastaanottopuskuriin tallennettujen tavujen määrä
+        int discard = 0;    // Arvolla 1 ohitetaan liian pitkä viesti loppumerkkiin asti
+        bool writing = false; // Tarkistaa onko viestin kirjoitus käynnissä vai ei
+        char tx_message[128] = "";  // Napeilla ja laiteasennoilla kirjoitettu Morse-viesti
+        size_t tx_length = 0; // Viestin pituus merkkeinä, välit luetaan mukaan ja '\0' luetaan pois. 
+        unsigned int sw1_streak = 0;  // Peräkkäisten SW1-painallusten "laskuri" viimeksi lisätyn symbolin jälkeen.
+                                      // 1. painallus = kirjainväli, 2. = sanaväli, 3 = viesti valmis, 4 = viestin lähetys
 
-        uint32_t count = usb_receive_morse(buf, sizeof(buf) - 1); // Jätetään yksi paikka nollamerkille
+        unsigned int symbol_count = 0; // Nykyiseen morsetukseen lisättyjen symbolien "laskuri". (4 symbolia maksimi)
 
-        if (count > 0){
-            // USB-luku antaa raakoja tavuja. Lisää '\0', jotta usb_send_morse() voi laskea merkkijonon pituuden strlen():llä.
-            buf[count] = '\0';
-            usb_send_morse(buf);
-        }
+        // IMU:n käyttövalmiustarkistus. Tarkistaa onko alustus ja mittauksen käynnistys onnistuneet (esmierkistä hat_imu_cdc_ex)
+        bool imu_ready = (init_ICM42670() == 0) && (ICM42670_start_with_default_values() == 0);  
 
-        // Tulosta testin tulos kerran sekunnissa.
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Rekisteröidään keskeytyskäsittelijä
 
-    }*/
+        gpio_set_irq_enabled_with_callback(
+            SW1_PIN, // GPIO-pinni
+            GPIO_IRQ_EDGE_RISE, // Keskeytys nousevalla reunalla
+            true, // Keskeytys käytössä
+            btn_fxn); // Kutsuttava keskeytyskäsittelijä
 
-        // Merkkien kirjaimiksi muuttamista ja viestien vastaanottamista ja lähettämistä USB-liikenteen avulla. 
+        gpio_set_irq_enabled(
+            SW2_PIN,
+            GPIO_IRQ_EDGE_RISE,
+            true);
 
-        char buf[64];       //Yhdellä lukukerralla saadut tavut
-        char message[256];  //Eri lukukerroilta kertyvä viesti
-        size_t length = 0; 
-        int discard = 0;    //Ohita liian pitkä viestin loppuosa
 
         while(1){
-            uint32_t count = usb_receive_morse(buf, sizeof(buf));
+
+           uint32_t button_events;  // FreeRTOS:lla luetut tapahtumabitit. Molemmat napit voivat olla ilmoitettuina
+
+            // xTaskNotifyWait tarkistaa nappitapahtumat jäämättä odottamaan niitä
+
+            if (xTaskNotifyWait(
+                0,                      // Ilmoitusbittejä ei nollata ennen lukemista
+                SW1_EVENT | SW2_EVENT,  // Kuitataan molempien nappien bitit lukemisen jälkeen
+                &button_events,         // Osoite, jonne saapuneet bitit kopioidaan
+                0)                      // Odotusaika (number of Ticks)
+                == pdTRUE){             // == pdTRUE: ilmoitus on saatu
+                
+                // Saapuneiden nappitapahtumien käsittely 
+
+                if (button_events & SW1_EVENT){
+                    const char *debug_text;  // SW1-painalluksen tuloksen viesti porttiin CDC0
+
+                    if (!writing) {
+                        writing = true;
+                        sw1_streak = 0; // SW1 peräkkäisten painallusten nollaus
+                        symbol_count = 0; // SW2 peräkkäisten symbolien nollaus
+                        debug_text = "Kirjoitus alkoi\n";
+                        } else{
+                            if (tx_length == 0){
+                                debug_text = "Lisää ensin merkki\n";
+
+                            } else if (sw1_streak < 2 && tx_length < sizeof(tx_message) -2){
+
+                                tx_message[tx_length] = ' ';
+                                tx_length++;
+                                tx_message[tx_length] = '\0';
+                                sw1_streak++;
+                                symbol_count = 0;
+                                debug_text = "Välilyönti\n";
+
+                            } else if (sw1_streak == 2){
+
+                                sw1_streak = 3;
+                                debug_text = "Viesti valmis. SW1 lähettää, SW2 jatkaa. \n";
+
+                            } else if (sw1_streak == 3){
+                                // Puskurin lopussa kaksi välilyöntiä
+
+                                tx_message[tx_length] = '\n';
+                                tx_message[tx_length +1] = '\0';
+                                usb_send_morse(tx_message);
+
+                                // Tyhjennetään kirjoituspuskuri ja palataan odottamaan uutta viestiä
+
+                                tx_length = 0;
+                                tx_message[0] = '\0';
+                                sw1_streak = 0;     // SW1 peräkkäisten painallusten nollaus
+                                symbol_count = 0; // SW2 peräkkäisten symbolien nollaus
+                                writing = false;
+                                debug_text = "Lähetyspyyntö tehty\n";
+
+                            } else {
+                                debug_text = "Puskuri täynnä\n";
+                            }
+                            
+                        }
+
+                    if (usb_serial_connected()) {
+                    usb_serial_print(debug_text);
+                    usb_serial_flush();
+                    }
+            }
+
+                if ((button_events & SW2_EVENT) && writing) {
+                    char symbol = '\0'; //Symbolin tunnistus tähän muuttujaan sensor datan lukemisen jälkeen.
+
+                    if(imu_ready){
+                        float ax, ay, az, gx, gy, gz, t;  // ax, ay, az kiihtyvyyksiä eri akseleilla. Tunnistus käyttää X- ja Z- arvoja.
+
+                        if (ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t) == 0){
+
+                            if (fabsf(az) > 0.8f){
+                                symbol = '.';  // Symboli on piste kun laite on vaakatasossa kummin päin tahansa
+
+                            } else if (fabsf(ax) > 0.8f){
+                                symbol = '-';  // Symboli on viiva kun laite on kyljellään kummin päin tahansa
+                            }
+
+                        }
+                    }
+
+                    if (symbol != '\0' && 
+                        tx_length < sizeof(tx_message) - 4 && // -4 varaa tilan kahdelle välilyönnille, '\n':lle ja '\0':lle
+                        symbol_count < 4){
+                        tx_message[tx_length] = symbol; // Annetaan symboli
+                        symbol_count++;  // Kasvatetaan nykyisten kirjainten symbolimäärää
+                        tx_length ++; // Kasvatetaan nykyisen viestin kokoa            
+                        tx_message[tx_length] = '\0';
+                        sw1_streak = 0; // Lisätty symboli katkaisee SW1-sarjan
+                        }
+                    
+
+                    if (usb_serial_connected()) {
+                    usb_serial_print(tx_message);
+                    usb_serial_print("\n");
+                    usb_serial_flush();
+                }
+             }
+        }
+
+            // Harjoitustyö: USB-viestien vastaanotto
+
+            uint32_t count = usb_receive_morse(buf, sizeof(buf));  // Tällä USB-lukukerralla vastaanotettujen tavujen määrä
 
             for (uint32_t i = 0; i < count; i++){
-                char c = buf[i];
+                char c = buf[i];  // c on vastaanottopuskurissa käsiteltävä yksittäinen tavu, i on käsiteltävän tavun indkesi USB-lukupuskurissa
 
                 if (c == '\n' || c == '!'){  //Huutomerkki toimii myös viestin lopettajana tässä rivinvaihdon lisäksi. Helpompi testata.
                     
@@ -218,10 +323,11 @@ static void print_task(void *arg){
                         message[length - 2] == ' ' &&
                         message[length - 1] == ' '))){
                         
-                        char letter = morse_to_letter("...");
+                        char letter = morse_to_letter("...");  // Kiinteän "..." testisyötteen purkutulos.
+                                                                // Varsinaista vastaanotettua viestiä ei vielä pureta
 
                         if(letter == 'S'){
-                            char response[] = {letter, '\n', '\0'};
+                            char response[] = {letter, '\n', '\0'};  // USB-testivastaus: kirjain, rivinvaihto ja merkkijonon loppu
                             usb_send_morse(response);
                         }
                         else {
@@ -248,36 +354,9 @@ static void print_task(void *arg){
     }
 }
 
-
-// Exercise 4: Uncomment the following line to activate the TinyUSB library.  
-// Tehtävä 4:  Poista seuraavan rivin kommentointi aktivoidaksesi TinyUSB-kirjaston. 
-
-// Otettu kommentti pois Tehtävää 4 varten usbTask-funktiosta
-
-/*static void usbTask(void *arg) {
-    (void)arg;
-    while (1) {
-        tud_task();              // With FreeRTOS wait for events
-                                 // Do not add vTaskDelay. 
-    }
-}*/
+// Alustetaan laite sekä USB ja luodaan FreeRTOS taskit
 
 int main() {
-
-    // Exercise 4: Comment the statement stdio_init_all(); 
-    //             Instead, add AT THE END OF MAIN (before vTaskStartScheduler();) adequate statements to enable the TinyUSB library and the usb-serial-debug.
-    //             You can see hello_dual_cdc for help
-    //             In CMakeLists.txt add the cfg-dual-usbcdc
-    //             In CMakeLists.txt deactivate pico_enable_stdio_usb
-    // Tehtävä 4:  Kommentoi lause stdio_init_all();
-    //             Sen sijaan lisää MAIN LOPPUUN (ennen vTaskStartScheduler();) tarvittavat komennot aktivoidaksesi TinyUSB-kirjaston ja usb-serial-debugin.
-    //             Voit katsoa apua esimerkistä hello_dual_cdc.
-    //             Lisää CMakeLists.txt-tiedostoon cfg-dual-usbcdc
-    //             Poista CMakeLists.txt-tiedostosta käytöstä pico_enable_stdio_usb
-
-    // Kommentoitu stdio_init_all(); pois Tehtävää 4 varten.
-
-    // stdio_init_all();
 
     // Uncomment this lines if you want to wait till the serial monitor is connected
     /*while (!stdio_usb_connected()){
@@ -287,26 +366,17 @@ int main() {
     init_hat_sdk();
     sleep_ms(300); //Wait some time so initialization of USB and hat is done.
 
-    // Exercise 1: Initialize the button and the led and define an register the corresponding interrupton.
-    //             Interruption handler is defined up as btn_fxn
-    // Tehtävä 1:  Alusta painike ja LEd ja rekisteröi vastaava keskeytys.
-    //             Keskeytyskäsittelijä on määritelty yläpuolella nimellä btn_fxn
-
-    // Alustetaan painike ja LED
+    // Harjoitustyö
+    // Alustetaan painikkeet ja LED
     init_sw1();
+    init_sw2();
     init_led();
 
-    // Rekisteröidään keskeytyskäsittelijä
+    // hSensorTask on valoisuusmittaustehtävän kahva
+    // hUSB on USB-tehtävän kahva, jota käytetään tarvittaessa ydinrajaukseen
 
-    gpio_set_irq_enabled_with_callback(
-        BUTTON1, // GPIO-pinni, sama asia kuin SW1_PIN
-        GPIO_IRQ_EDGE_RISE, // Keskeytys nousevalla reunalla
-        true, // Keskeytys käytössä
-        btn_fxn); // Kutsuttava keskeytyskäsittelijä
-    
-    TaskHandle_t hSensorTask, hPrintTask, hUSB = NULL;
+    TaskHandle_t hSensorTask, hUSB = NULL;
 
-    // Exercise 4: Uncomment this xTaskCreate to create the task that enables dual USB communication.
     // Tehtävä 4: Poista tämän xTaskCreate-rivin kommentointi luodaksesi tehtävän,
     // joka mahdollistaa kaksikanavaisen USB-viestinnän.
 
@@ -319,7 +389,7 @@ int main() {
                 3,                                // Tehtävän prioriteetti
                 &hUSB);                           // Tehtävän kahva
 
-    if(usb_result != pdPASS){                     //Tarkistetaan, että USB-tehtävän luonti onnistui.
+    if(usb_result != pdPASS){                     // USB-tehtävän luonnin paluuarvo. pdPass tarkoittaa onnistumista
         return 1;
     }
 
@@ -329,7 +399,7 @@ int main() {
 
 
     // Create the tasks with xTaskCreate
-    BaseType_t result = xTaskCreate(sensor_task, // (en) Task function
+    BaseType_t result = xTaskCreate(sensor_task, // Viimeisimmän sensor-tehtävän luonnin paluuarvo
                 "sensor",                        // (en) Name of the task 
                 DEFAULT_STACK_SIZE,              // (en) Size of the stack for this task (in words). Generally 1024 or 2048
                 NULL,                            // (en) Arguments of the task 
@@ -340,27 +410,23 @@ int main() {
         printf("Sensor task creation failed\n");
         return 0;
     }
-    result = xTaskCreate(print_task,  // (en) Task function
-                "print",              // (en) Name of the task 
-                DEFAULT_STACK_SIZE,   // (en) Size of the stack for this task (in words). Generally 1024 or 2048
-                NULL,                 // (en) Arguments of the task 
-                2,                    // (en) Priority of this task
-                &hPrintTask);         // (en) A handle to control the execution of this task
+    result = xTaskCreate(print_task,  // Viimeisimmän print-tehtävän luonnin paluuarvo
+                "print",              // Tehtävän nimi vianetsintää varten 
+                DEFAULT_STACK_SIZE,   // Tehtävän pinon koko sanoina, ei tavuina
+                NULL,                 // Tehtäväfunktiolle annettava argumentti
+                2,                    // Tehtävän prioriteetti
+                &hPrintTask);         // Osoite, johon FreeRTOS tallentaa tehtävän kahvan
 
     if(result != pdPASS) {
         printf("Print Task creation failed\n");
         return 0;
     }
 
-    // Lisätään Tehtävän 4 alustukset
-    //tusb_init();
-    //usb_serial_init();
-
     // Alusta USB-moduuli ennen kuin FreeRTOS käynnistää tehtävät
 
-    usb_init(); // usb_comm.c tiedostossa alustukset
+    usb_init(); // Alustaa USB-sarjaliikenteen ennen tehtävien ajastuksen käynnistämistä
 
-    // Start the scheduler (never returns)
+    // Käynnistää FreeRTOS-ajastimen, joka alkaa suorittaa luotuja tehtäviä 
     vTaskStartScheduler();
     
     // Never reach this line.
