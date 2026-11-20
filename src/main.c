@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <pico/stdlib.h>
+#include "pico/cyw43_arch.h"
 
 #include <FreeRTOS.h>
 #include <queue.h>
@@ -29,9 +30,11 @@ enum state{ // Järjestlmän tilat
 };
 enum state programState = IDLE;
 
-unsigned int symbol_count = 0; // Nykyiseen morsetukseen lisättyjen symbolien "laskuri". (4 symbolia maksimi)
+unsigned int symbol_count; // Nykyiseen morsetukseen lisättyjen symbolien "laskuri". (4 symbolia maksimi)
 char buf[64];       // Yhdellä USB-lukukerralla vastaanotetut tavut
 char message[256];  // Useasta USB-luvusta koottava vastaanottopuskuri
+char symbol;
+unsigned char word_length; // Nykyisen sanan pituus
 size_t length = 0;  // Vastaanottopuskuriin tallennettujen tavujen määrä
 int discard = 0;    // Arvolla 1 ohitetaan liian pitkä viesti loppumerkkiin asti
 char tx_message[128] = "";
@@ -49,7 +52,126 @@ static void send_debug_output(const char* text){
     }
 }
 
-// TODO: USB vastaanotto
+// Set LED on/off
+static void set_led(bool on) {
+    gpio_put(RED_LED_PIN, on);
+}
+
+// ---- FreeRTOS task ----
+static void led_task(void *arg) {
+    (void)arg;
+    init_led();
+
+    for (;;) {
+        //send_debug_output("LED task running"); // sanity check
+        if (programState == READY){
+            //send_debug_output("LED: READY"); // sanity check
+            for (int i = 0; i < tx_length; i++){
+                if (tx_message[i] == '.'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (tx_message[i] == '-'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (tx_message[i] == ' '){
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                }
+            }
+        }/* TODO: Ei toimi vielä
+         else if (sw1_streak == 1){ // Esitä syötetty morse-kirjain LEDillä, kun SW1 on painettu kerran. (Kirjainväli)
+            //send_debug_output("LED: SW1 pressed once"); // sanity check
+            char debug_text[128] = {0};
+            snprintf(debug_text, sizeof(debug_text), "Symbol count: %c", symbol_count + '0'); // Convert symbol_count to char
+            send_debug_output(debug_text);
+            for(int i = tx_length - symbol_count; i < tx_length; i++){
+                char string[128];
+                snprintf(string, sizeof(string), "tx_message[%d] = %c\n", i, tx_message[i]); // sanity check
+                send_debug_output(string);
+                if (tx_message[i] == '.'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (tx_message[i] == '-'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                }
+            }
+
+        } else if (sw1_streak == 2){
+            send_debug_output("LED: SW1 pressed twice"); // sanity check
+            for(int i = tx_length - word_length; i < tx_length; i++){
+                if (tx_message[i] == '.'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (tx_message[i] == '-'){
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if( tx_message[i] == ' '){
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                }
+            }
+        }*/
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+/*
+static void usb_task(void *arg){
+    (void)arg;
+    usb_init();
+    usb_serial_init();
+    uint32_t count = usb_receive_morse(buf, sizeof(buf));  // Tällä USB-lukukerralla vastaanotettujen tavujen määrä
+    while(1){
+        for (uint32_t i = 0; i < count; i++){
+            char c = buf[i];  // c on vastaanottopuskurissa käsiteltävä yksittäinen tavu, i on käsiteltävän tavun indkesi USB-lukupuskurissa
+
+            if (c == '\n' || c == '!'){  //Huutomerkki toimii myös viestin lopettajana tässä rivinvaihdon lisäksi. Helpompi testata.
+                    
+                if(!discard && ((c == '!' && length > 0) || 
+                    (c == '\n' && length >= 2 &&
+                    message[length - 2] == ' ' &&
+                    message[length - 1] == ' ')))
+                {
+                    char letter = morse_to_letter("...");  // Kiinteän "..." testisyötteen purkutulos.
+                                                            // Varsinaista vastaanotettua viestiä ei vielä pureta
+
+                    if(letter == 'S'){
+                        char response[] = {letter, '\n', '\0'};  // USB-testivastaus: kirjain, rivinvaihto ja merkkijonon loppu
+                        usb_send_morse(response);
+                    }
+                    else {
+                        usb_send_morse("MORSE-TESTI EPÄONNISTUI\n");
+                    }
+                }
+                // Aloitetaan seuraavan viestin kerääminen tyhjästä
+                length = 0;
+                discard = 0;
+                continue;
+            }
+            // Kerätään tavut puskuriin, kunnes viesti päättyy tai tila loppuu
+            if(!discard){
+                if(length < sizeof(message)){
+                    message[length++] = c;
+                } else {
+                    discard = 1;
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+*/
 
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     /*  Harjoitustyö: 
@@ -77,9 +199,10 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
 }
 
 static void add_symbol(){
-    char symbol = '\0'; // Alustus symbolimuuttujalle.
+    symbol = '\0'; // Alustus symbolimuuttujalle.
     if(imu_ready){
         float ax, ay, az, gx, gy, gz, t;  // ax, ay, az kiihtyvyyksiä eri akseleilla. Tunnistus käyttää X- ja Z- arvoja.
+        word_length++;
         if (ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t) == 0){
             if (fabsf(ay) > 0.8f){
                 symbol = '-';  // Symboli on viiva kun laite on kyljellään kummin päin tahansa
@@ -117,8 +240,13 @@ static void handle_sw1(){
                     sw1_streak++;
                     symbol_count = 0;
 
-                    if(sw1_streak==1) send_debug_output("Kirjainväli");
-                    else send_debug_output("Sanaväli");
+                    if(sw1_streak==1){
+                        send_debug_output("Kirjainväli");
+                    }
+                    else{
+                        send_debug_output("Sanaväli");
+                        word_length = 0; // Nollataan nykyisen sanan pituus
+                    }
 
                 } else {
                     programState = READY;
@@ -177,8 +305,6 @@ static void handle_sw2(){
 static void morse_task(void *arg){ // Edellinen print_task
     (void)arg;
 
-    // TODO Muuttujien alustukset
-
     TickType_t recent_SW1_press = 0;  // Alustetaan viimeisin SW1-painallus
     bool hasPreviousPress = false;  // Alustetaan onko vielä painallusta tullut
     TickType_t recent_SW2_press = 0;  // Alustetaan viimeisin SW2-painallus
@@ -210,8 +336,8 @@ static void morse_task(void *arg){ // Edellinen print_task
                 hasPreviousPress = true;
             }
         }
-    vTaskDelay(pdMS_TO_TICKS(20));
-    }
+        vTaskDelay(pdMS_TO_TICKS(20));
+        }
 }
 
 int main(){
@@ -222,7 +348,6 @@ int main(){
     // Painikkeiden ja antureiden alustukset
     init_sw1();
     init_sw2();
-    init_led();
     // IMU:n käyttövalmiustarkistus. Tarkistaa onko alustus ja mittauksen käynnistys onnistuneet (esmierkistä hat_imu_cdc_ex)
     imu_ready = (init_ICM42670() == 0) && (ICM42670_start_with_default_values() == 0);  
 
@@ -262,12 +387,22 @@ int main(){
         2,                    // Tehtävän prioriteetti
     &hMorseTask);         // Osoite, johon FreeRTOS tallentaa tehtävän kahvan
 
+    TaskHandle_t led_task_handle = NULL;
+
+    BaseType_t led_result =xTaskCreate(led_task,       // (en) Task function
+                "led",          // (en) Name of the task 
+                512,            // (en) Size of the stack for this task (in words). Generally 1024 or 2048
+                NULL,           //(en) Arguments of the task 
+                2,              // (en) Priority of this task
+                &led_task_handle); // (en) A handle to control the execution of this task
+    
     if(result != pdPASS) {
         printf("Morse Task creation failed\n");
         return 0;
     }
 
     usb_init();
+    usb_serial_init();
 
     vTaskStartScheduler();
 

@@ -309,7 +309,7 @@ static void print_task(void *arg){
                 length = 0;
                 discard = 0;
                 continue;
-            }
+                }
 
             // Kerätään tavut puskuriin, kunnes viesti päättyy tai tila loppuu
             if(!discard){
@@ -319,7 +319,7 @@ static void print_task(void *arg){
                     discard = 1;
                 }
             }
-        }
+            }
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
