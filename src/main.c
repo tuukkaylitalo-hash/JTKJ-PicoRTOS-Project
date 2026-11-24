@@ -36,6 +36,7 @@ char message[256];  // Useasta USB-luvusta koottava vastaanottopuskuri
 char symbol;
 unsigned char word_length; // Nykyisen sanan pituus
 size_t length = 0;  // Vastaanottopuskuriin tallennettujen tavujen määrä
+size_t old_length = 0; // Edellisen viestin pituus
 int discard = 0;    // Arvolla 1 ohitetaan liian pitkä viesti loppumerkkiin asti
 char tx_message[128] = "";
 size_t tx_length = 0;
@@ -57,7 +58,6 @@ static void set_led(bool on) {
     gpio_put(RED_LED_PIN, on);
 }
 
-// ---- FreeRTOS task ----
 static void led_task(void *arg) {
     (void)arg;
     init_led();
@@ -81,7 +81,31 @@ static void led_task(void *arg) {
                     vTaskDelay(pdMS_TO_TICKS(600));
                 }
             }
-        }/* TODO: Ei toimi vielä
+        } else {
+            //char str[2];
+            //str[0] = old_length + '0';
+            //str[1] = '\0';
+            //send_debug_output(str); // Print the length for debugging
+            for (int i = 0; i < old_length; i++){
+                if (message[i] == '.'){
+                    //send_debug_output("LED: Dot"); // sanity check
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (message[i] == '-'){
+                    //send_debug_output("LED: Dash"); // sanity check
+                    set_led(true);
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                    set_led(false);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else if (message[i] == ' '){
+                    //send_debug_output("LED: Space"); // sanity check
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                }
+            }
+        }
+        /* TODO: Ei toimi vielä
          else if (sw1_streak == 1){ // Esitä syötetty morse-kirjain LEDillä, kun SW1 on painettu kerran. (Kirjainväli)
             //send_debug_output("LED: SW1 pressed once"); // sanity check
             char debug_text[128] = {0};
@@ -141,7 +165,7 @@ static void receive_usb_task(void *arg){
 
         for (uint32_t i = 0; i < count; i++){
             char c = buf[i];  // c on vastaanottopuskurissa käsiteltävä yksittäinen tavu, i on käsiteltävän tavun indkesi USB-lukupuskurissa
-            send_debug_output(&c); // Print the received character for debugging
+            //send_debug_output(&c); // Print the received character for debugging
             if (c == '\n' || c == '!'){  //Huutomerkki toimii myös viestin lopettajana tässä rivinvaihdon lisäksi. Helpompi testata.
                     
                 if(!discard && ((c == '!' && length > 0) || 
@@ -162,9 +186,9 @@ static void receive_usb_task(void *arg){
                     else usb_send_morse("MORSE-TESTI EPÄONNISTUI\n");*/
                 }
                 // Aloitetaan seuraavan viestin kerääminen tyhjästä
+                old_length = length; // Store the length of the current message before resetting
                 length = 0;
                 discard = 0;
-                message[0] = '\0'; // Reset the message buffer
                 continue;
             }
             // Kerätään tavut puskuriin, kunnes viesti päättyy tai tila loppuu
@@ -175,7 +199,7 @@ static void receive_usb_task(void *arg){
                     discard = 1;
                 }
             }
-            send_debug_output(message); // Print the current message buffer for debugging
+            //send_debug_output(message); // Print the current message buffer for debugging
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
