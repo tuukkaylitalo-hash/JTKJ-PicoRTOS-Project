@@ -126,16 +126,22 @@ static void led_task(void *arg) {
     }
 }
 
-/*
-static void usb_task(void *arg){
+
+static void receive_usb_task(void *arg){
     (void)arg;
-    usb_init();
-    usb_serial_init();
-    uint32_t count = usb_receive_morse(buf, sizeof(buf));  // Tällä USB-lukukerralla vastaanotettujen tavujen määrä
+    //send_debug_output("USB receive task started");
+    //usb_init();
+    //usb_serial_init();
+    //uint32_t count = usb_receive_morse(buf, sizeof(buf));  // Tällä USB-lukukerralla vastaanotettujen tavujen määrä
     while(1){
+        //send_debug_output("USB receive task running");
+        uint32_t count = usb_receive_morse(buf, sizeof(buf));
+        //char text[] = {count + '0', '\0'}; // Convert count to char
+        //send_debug_output(text);
+
         for (uint32_t i = 0; i < count; i++){
             char c = buf[i];  // c on vastaanottopuskurissa käsiteltävä yksittäinen tavu, i on käsiteltävän tavun indkesi USB-lukupuskurissa
-
+            send_debug_output(&c); // Print the received character for debugging
             if (c == '\n' || c == '!'){  //Huutomerkki toimii myös viestin lopettajana tässä rivinvaihdon lisäksi. Helpompi testata.
                     
                 if(!discard && ((c == '!' && length > 0) || 
@@ -143,20 +149,22 @@ static void usb_task(void *arg){
                     message[length - 2] == ' ' &&
                     message[length - 1] == ' ')))
                 {
-                    char letter = morse_to_letter("...");  // Kiinteän "..." testisyötteen purkutulos.
+                    
+                    
+                    
+                    /*char letter = morse_to_letter("...");  // Kiinteän "..." testisyötteen purkutulos.
                                                             // Varsinaista vastaanotettua viestiä ei vielä pureta
 
                     if(letter == 'S'){
                         char response[] = {letter, '\n', '\0'};  // USB-testivastaus: kirjain, rivinvaihto ja merkkijonon loppu
                         usb_send_morse(response);
                     }
-                    else {
-                        usb_send_morse("MORSE-TESTI EPÄONNISTUI\n");
-                    }
+                    else usb_send_morse("MORSE-TESTI EPÄONNISTUI\n");*/
                 }
                 // Aloitetaan seuraavan viestin kerääminen tyhjästä
                 length = 0;
                 discard = 0;
+                message[0] = '\0'; // Reset the message buffer
                 continue;
             }
             // Kerätään tavut puskuriin, kunnes viesti päättyy tai tila loppuu
@@ -167,11 +175,12 @@ static void usb_task(void *arg){
                     discard = 1;
                 }
             }
+            send_debug_output(message); // Print the current message buffer for debugging
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-*/
+
 
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     /*  Harjoitustyö: 
@@ -205,8 +214,8 @@ static void add_symbol(){
         word_length++;
         if (ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t) == 0){
             if (fabsf(ay) > 0.8f){
-                symbol = '-';  // Symboli on viiva kun laite on kyljellään kummin päin tahansa
-            } else symbol = '.';
+                symbol = '.';  // Symboli on viiva kun laite on kyljellään kummin päin tahansa
+            } else symbol = '-';
         }
         if (symbol != '\0' && 
             tx_length < sizeof(tx_message) - 4 && // -4 varaa tilan kahdelle välilyönnille, '\n':lle ja '\0':lle
@@ -268,11 +277,14 @@ static void handle_sw1(){
             send_debug_output("Viesti lähetetty. Kirjoitus valmis.");
             break;
     }
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 static void handle_sw2(){
     switch(programState){
         case IDLE:
+            /*
+            // Tämä on testikoodi, jolla voidaan tarkistaa IMU:n toiminta. Ei ole osa varsinaista harjoitustyötä.
             float ax, ay, az, gx, gy, gz, t;
             char debug[128];
             ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
@@ -280,11 +292,10 @@ static void handle_sw2(){
                 sizeof(debug),
                 "IMU data: ax=%.2f ay=%.2f az=%.2f gx=%.2f gy=%.2f gz=%.2f t=%.2f\n",
                 ax, ay, az, gx, gy, gz, t);
-
             usb_serial_print(debug);
             usb_serial_flush();
-
-
+            */ 
+            send_debug_output("SW1 aloittaa kirjoittamisen.");
             break; // Ei tehdä mitään, kun ei ole kirjoitusta käynnissä
         case WRITING:
         {
@@ -300,6 +311,7 @@ static void handle_sw2(){
             send_debug_output("Kirjoitus jatkuu");
             break;
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
 }
 
 static void morse_task(void *arg){ // Edellinen print_task
@@ -373,6 +385,17 @@ int main(){
                 &hUSB);                           // Tehtävän kahva
 
     if(usb_result != pdPASS){                     // USB-tehtävän luonnin paluuarvo. pdPass tarkoittaa onnistumista
+        return 1;
+    }
+
+BaseType_t receive_usb_result = xTaskCreate(receive_usb_task, // Tehtäväfunktio
+                "receive_usb",                            // Tehtävän nimi 
+                2048,                             // Stackin koko
+                NULL,                             // Tehtävän argumentit
+                3,                                // Tehtävän prioriteetti
+                &hUSB);                           // Tehtävän kahva
+
+    if(receive_usb_result != pdPASS){                     // USB-tehtävän luonnin paluuarvo. pdPass tarkoittaa onnistumista
         return 1;
     }
 
