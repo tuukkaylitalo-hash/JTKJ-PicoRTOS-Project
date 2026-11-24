@@ -21,14 +21,14 @@
 #define SW1_EVENT (1u << 0) // SW1-painalluksen ilmoitusbitti.
 #define SW2_EVENT (1u << 1) // SW2-painalluksen ilmoitusbitti.
 
-static void send_debug_output(const char *text);
-
 enum state{ // Järjestlmän tilat
     IDLE,
     WRITING,
     READY
 };
 enum state programState = IDLE;
+
+// Muuttujaesittelyt
 
 unsigned int symbol_count; // Nykyiseen morsetukseen lisättyjen symbolien "laskuri". (4 symbolia maksimi)
 char buf[64];       // Yhdellä USB-lukukerralla vastaanotetut tavut
@@ -82,10 +82,6 @@ static void led_task(void *arg) {
                 }
             }
         } else {
-            //char str[2];
-            //str[0] = old_length + '0';
-            //str[1] = '\0';
-            //send_debug_output(str); // Print the length for debugging
             for (int i = 0; i < old_length; i++){
                 if (message[i] == '.'){
                     //send_debug_output("LED: Dot"); // sanity check
@@ -105,47 +101,6 @@ static void led_task(void *arg) {
                 }
             }
         }
-        /* TODO: Ei toimi vielä
-         else if (sw1_streak == 1){ // Esitä syötetty morse-kirjain LEDillä, kun SW1 on painettu kerran. (Kirjainväli)
-            //send_debug_output("LED: SW1 pressed once"); // sanity check
-            char debug_text[128] = {0};
-            snprintf(debug_text, sizeof(debug_text), "Symbol count: %c", symbol_count + '0'); // Convert symbol_count to char
-            send_debug_output(debug_text);
-            for(int i = tx_length - symbol_count; i < tx_length; i++){
-                char string[128];
-                snprintf(string, sizeof(string), "tx_message[%d] = %c\n", i, tx_message[i]); // sanity check
-                send_debug_output(string);
-                if (tx_message[i] == '.'){
-                    set_led(true);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                    set_led(false);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                } else if (tx_message[i] == '-'){
-                    set_led(true);
-                    vTaskDelay(pdMS_TO_TICKS(600));
-                    set_led(false);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                }
-            }
-
-        } else if (sw1_streak == 2){
-            send_debug_output("LED: SW1 pressed twice"); // sanity check
-            for(int i = tx_length - word_length; i < tx_length; i++){
-                if (tx_message[i] == '.'){
-                    set_led(true);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                    set_led(false);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                } else if (tx_message[i] == '-'){
-                    set_led(true);
-                    vTaskDelay(pdMS_TO_TICKS(600));
-                    set_led(false);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                } else if( tx_message[i] == ' '){
-                    vTaskDelay(pdMS_TO_TICKS(600));
-                }
-            }
-        }*/
     vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -219,7 +174,7 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
         }
         else button_event = SW2_EVENT;
 
-        xTaskNotifyFromISR(     // xTaskNotifyFromISR ilmoittaa keskeytyksestä print_taskille, kumpaa nappia painettiin
+        xTaskNotifyFromISR(     // xTaskNotifyFromISR ilmoittaa keskeytyksestä morse_taskille, kumpaa nappia painettiin
             hMorseTask,         // Ilmoituksen vastaanottavan tehtävän kahva
             button_event,       // SW1 tai SW2 ilmoitusbitti
             eSetBits,           // asettaa valitun bitin niin, että toisen napin käsittelemätön ilmoitus säilyy
@@ -237,7 +192,7 @@ static void add_symbol(){
         float ax, ay, az, gx, gy, gz, t;  // ax, ay, az kiihtyvyyksiä eri akseleilla. Tunnistus käyttää X- ja Z- arvoja.
         word_length++;
         if (ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t) == 0){
-            if (fabsf(ay) > 0.8f){
+            if (fabsf(ay) > 0.6f){
                 symbol = '.';  // Symboli on viiva kun laite on kyljellään kummin päin tahansa
             } else symbol = '-';
         }
@@ -301,13 +256,12 @@ static void handle_sw1(){
             send_debug_output("Viesti lähetetty. Kirjoitus valmis.");
             break;
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 static void handle_sw2(){
     switch(programState){
         case IDLE:
-            /*
+            
             // Tämä on testikoodi, jolla voidaan tarkistaa IMU:n toiminta. Ei ole osa varsinaista harjoitustyötä.
             float ax, ay, az, gx, gy, gz, t;
             char debug[128];
@@ -318,7 +272,7 @@ static void handle_sw2(){
                 ax, ay, az, gx, gy, gz, t);
             usb_serial_print(debug);
             usb_serial_flush();
-            */ 
+             
             send_debug_output("SW1 aloittaa kirjoittamisen.");
             break; // Ei tehdä mitään, kun ei ole kirjoitusta käynnissä
         case WRITING:
@@ -335,45 +289,34 @@ static void handle_sw2(){
             send_debug_output("Kirjoitus jatkuu");
             break;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-static void morse_task(void *arg){ // Edellinen print_task
+static void morse_task(void *arg){
     (void)arg;
-
-    TickType_t recent_SW1_press = 0;  // Alustetaan viimeisin SW1-painallus
-    bool hasPreviousPress = false;  // Alustetaan onko vielä painallusta tullut
-    TickType_t recent_SW2_press = 0;  // Alustetaan viimeisin SW2-painallus
-
+    TickType_t recent_SW_press = 0;  // Alustetaan viimeisin painallus
     while(1){
         uint32_t button_events;  // FreeRTOS:lla luetut tapahtumabitit. Molemmat napit voivat olla ilmoitettuina
-
-        if (xTaskNotifyWait(
+        xTaskNotifyWait(
             0,                      // Ilmoitusbittejä ei nollata ennen lukemista
             SW1_EVENT | SW2_EVENT,  // Kuitataan molempien nappien bitit lukemisen jälkeen
             &button_events,         // Osoite, jonne saapuneet bitit kopioidaan
-            0)                      // Odotusaika (number of Ticks) eli ei jäädä odottamaan ilmoitusta
-            == pdTRUE)
-        {  
-            TickType_t time_now = xTaskGetTickCount();
-            if((button_events & SW1_EVENT) &&
-                (!hasPreviousPress ||(time_now - recent_SW1_press >= pdMS_TO_TICKS(100))))
-            {
-                recent_SW1_press = time_now;
-                hasPreviousPress = true;
-                handle_sw1();
-            }
+            0);     // Odotusaika (number of Ticks)
+        TickType_t time_now = xTaskGetTickCount();
+        if((button_events & SW1_EVENT) &&
+            ((time_now - recent_SW_press >= pdMS_TO_TICKS(200))))
+        {
+            recent_SW_press = time_now;
+            handle_sw1();
+        }
 
-            if((button_events & SW2_EVENT) &&
-                (!hasPreviousPress ||(time_now - recent_SW2_press >= pdMS_TO_TICKS(100))))
-            {
-                handle_sw2();
-                recent_SW2_press = time_now;
-                hasPreviousPress = true;
-            }
+        if((button_events & SW2_EVENT) &&
+            ((time_now - recent_SW_press >= pdMS_TO_TICKS(200))))
+        {
+            recent_SW_press = time_now;
+            handle_sw2();
         }
         vTaskDelay(pdMS_TO_TICKS(20));
-        }
+    }
 }
 
 int main(){
@@ -405,7 +348,7 @@ int main(){
                 "usb",                            // Tehtävän nimi 
                 2048,                             // Stackin koko
                 NULL,                             // Tehtävän argumentit
-                3,                                // Tehtävän prioriteetti
+                2,                                // Tehtävän prioriteetti
                 &hUSB);                           // Tehtävän kahva
 
     if(usb_result != pdPASS){                     // USB-tehtävän luonnin paluuarvo. pdPass tarkoittaa onnistumista
@@ -416,7 +359,7 @@ BaseType_t receive_usb_result = xTaskCreate(receive_usb_task, // Tehtäväfunkti
                 "receive_usb",                            // Tehtävän nimi 
                 2048,                             // Stackin koko
                 NULL,                             // Tehtävän argumentit
-                3,                                // Tehtävän prioriteetti
+                1,                                // Tehtävän prioriteetti
                 &hUSB);                           // Tehtävän kahva
 
     if(receive_usb_result != pdPASS){                     // USB-tehtävän luonnin paluuarvo. pdPass tarkoittaa onnistumista
@@ -428,11 +371,11 @@ BaseType_t receive_usb_result = xTaskCreate(receive_usb_task, // Tehtäväfunkti
     #endif
 
     BaseType_t result = xTaskCreate(morse_task,  // Viimeisimmän print-tehtävän luonnin paluuarvo
-        "morse",              // Tehtävän nimi
-        DEFAULT_STACK_SIZE,   // Tehtävän pinon koko sanoina
-        NULL,                 // Tehtäväfunktiolle annettava argumentti
-        2,                    // Tehtävän prioriteetti
-    &hMorseTask);         // Osoite, johon FreeRTOS tallentaa tehtävän kahvan
+                "morse",              // Tehtävän nimi
+                DEFAULT_STACK_SIZE,   // Tehtävän pinon koko sanoina
+                NULL,                 // Tehtäväfunktiolle annettava argumentti
+                2,                    // Tehtävän prioriteetti
+                &hMorseTask);         // Osoite, johon FreeRTOS tallentaa tehtävän kahvan
 
     TaskHandle_t led_task_handle = NULL;
 
@@ -440,7 +383,7 @@ BaseType_t receive_usb_result = xTaskCreate(receive_usb_task, // Tehtäväfunkti
                 "led",          // (en) Name of the task 
                 512,            // (en) Size of the stack for this task (in words). Generally 1024 or 2048
                 NULL,           //(en) Arguments of the task 
-                2,              // (en) Priority of this task
+                3,              // (en) Priority of this task
                 &led_task_handle); // (en) A handle to control the execution of this task
     
     if(result != pdPASS) {
