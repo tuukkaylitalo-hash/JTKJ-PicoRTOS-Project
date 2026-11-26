@@ -12,7 +12,7 @@
 #include "tkjhat/sdk.h"
 #include <stdbool.h>
 #include "usb_comm.h" // USB-moduulin funktioita
-#include "morse.h" // Kirjasto morse-merkkien muuntamiseen kirjaimiksi
+//#include "morse.h" // Kirjasto morse-merkkien muuntamiseen kirjaimiksi (ei käytetty lopullisessa toteutuksessa)
 #include "usbSerialDebug/helper.h"  //USB-debug kirjasto
 
 #define DEFAULT_STACK_SIZE 2048  //Tehtävien pinon koko sanoina
